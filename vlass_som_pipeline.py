@@ -151,6 +151,13 @@ for tile_id in tiles:
         out_cat_path, radio_cat, tile_cat, coad_summary, ir_data_path, tile_id
     )
 
+    radio_sample["filename"] = radio_sample["Component_name"].apply(
+        add_filename, survey="VLASS"
+    )
+    radio_sample["ir_filename"] = radio_sample["Component_name"].apply(
+        add_filename, survey="unWISE_NEO4"
+    )
+
     # /// Acquire Data \\\
     tile_cutout_path = os.path.join(cutout_path, tile_id)
     if not os.path.exists(imbin_file):
@@ -169,6 +176,14 @@ for tile_id in tiles:
             imgsize_arcmin=3.0,
             imgsize_pix=300,
         )
+
+    # imgs = cxc.preprocess(
+    #     radio_sample,
+    #     imbin_file,
+    #     img_size=(2, 300, 300),
+    #     tile_cutout_path=tile_cutout_path,
+    #     remove_tile_cutouts=False,
+    # )
 
     # Preprocess, map, and collate
     comp_cat, src_cat = cxc.run_all(
