@@ -14,7 +14,7 @@ import pyink as pu
 import vlass_data_loader as vdl
 import complex_xid_core as cxc
 
-from vos import Client as VOSpace
+# from vos import Client as VOSpace
 
 
 def add_filename(objname, survey="DECaLS-DR8", format="fits"):
@@ -95,7 +95,7 @@ def load_unwise(tile_cat, coad_summary, ir_data_path, tile_id):
 
 
 # /// Input Info \\\
-overwrite = True
+overwrite = False
 
 # Run from `Pipeline` directory
 pipe_dir = os.getcwd()
