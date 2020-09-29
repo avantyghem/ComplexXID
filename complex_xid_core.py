@@ -198,6 +198,7 @@ def map(
     nrot=360,
     numthreads=10,
     overwrite=False,
+    log=True,
 ):
     # /// Map through SOM \\\
     imgs = pu.ImageReader(imbin_file)
@@ -212,6 +213,7 @@ def map(
             numthreads=numthreads,
             cpu=cpu_only,
             nrot=nrot,
+            log=log,
         )
 
     som = pu.SOM(som_file)
