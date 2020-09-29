@@ -73,6 +73,7 @@ def map_imbin(
     numthreads=4,
     cpu=False,
     nrot=360,
+    log=True,
 ):
     commands = [
         "Pink",
@@ -96,9 +97,12 @@ def map_imbin(
     if cpu:
         commands += ["--cuda-off"]
 
-    map_logfile = map_file.replace(".bin", ".log")
-    with open(map_logfile, "w") as log:
-        subprocess.run(commands, stdout=log)
+    if log:
+        map_logfile = map_file.replace(".bin", ".log")
+        with open(map_logfile, "w") as log:
+            subprocess.run(commands, stdout=log)
+    else:
+        subprocess.run(commands)
 
 
 def reformat_source_table(catalog):
