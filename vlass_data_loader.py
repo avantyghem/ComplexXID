@@ -102,7 +102,8 @@ def vlass_tile(subtiles):
 
 
 def load_vlass_catalogue(catalog, complex=True, **kwargs):
-    df = Table.read(catalog, format="csv").to_pandas()
+    fmt = "fits" if catalog.endswith("fits") else "csv"
+    df = Table.read(catalog, format=fmt).to_pandas()
     # df = df[(df.Quality_flag == 0) & (df.Duplicate_flag < 2)]
     df = df[df.Total_flux >= df.Peak_flux]
     df = df[df.Peak_flux >= 5 * df.Isl_rms]

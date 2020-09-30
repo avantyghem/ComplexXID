@@ -113,8 +113,8 @@ for out_dir in [out_cat_path, out_bin_path]:
     if not os.path.exists(out_dir):
         os.mkdir(out_dir)
 
-radio_component_catalogue = "CIRADA_VLASS1QL_table1_components_v01.csv.gz"
-vlass_subtiles = "CIRADA_VLASS1QL_table3_subtile_info_v01.csv.gz"
+radio_component_catalogue = "CIRADA_VLASS1QL_table1_components_v01.fits"
+vlass_subtiles = "CIRADA_VLASS1QL_table3_subtile_info_v01.fits"
 ir_data_path = os.path.join(ir_cat_path, "coads")
 coad_summary = os.path.join(ir_cat_path, "unWISE_coad_summary.csv")
 
@@ -131,7 +131,7 @@ radio_cat = vdl.load_vlass_catalogue(
 
 print("Creating the tile catalogue")
 subtile_file = os.path.join(radio_path, vlass_subtiles)
-subtile_cat = Table.read(subtile_file, format="csv").to_pandas()
+subtile_cat = Table.read(subtile_file, format="fits").to_pandas()
 tile_cat = vdl.vlass_tile(subtile_cat)
 
 print("Loading the SOM and annotations")
@@ -193,7 +193,7 @@ for tile_id in tiles:
         tile_cutout_path,
         bin_path=out_bin_path,
         img_size=(2, 300, 300),
-        numthreads=10,
+        numthreads=6,
         annotation=annotation,
         remove_tile_cutouts=False,
         cpu_only=False,
