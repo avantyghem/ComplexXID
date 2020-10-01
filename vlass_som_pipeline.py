@@ -2,7 +2,7 @@
 
 The SOM is trained on a separate dataset.
 """
-import os
+import os, sys
 import shutil
 import subprocess
 import numpy as np
@@ -114,7 +114,7 @@ for out_dir in [out_cat_path, out_bin_path]:
         os.mkdir(out_dir)
 
 radio_component_catalogue = "CIRADA_VLASS1QL_table1_components_v01.fits"
-vlass_subtiles = "CIRADA_VLASS1QL_table3_subtile_info_v01.fits"
+vlass_subtiles = "CIRADA_VLASS1QL_table3_subtile_info_v01.csv.gz"
 ir_data_path = os.path.join(ir_cat_path, "coads")
 coad_summary = os.path.join(ir_cat_path, "unWISE_coad_summary.csv")
 
@@ -131,7 +131,7 @@ radio_cat = vdl.load_vlass_catalogue(
 
 print("Creating the tile catalogue")
 subtile_file = os.path.join(radio_path, vlass_subtiles)
-subtile_cat = Table.read(subtile_file, format="fits").to_pandas()
+subtile_cat = Table.read(subtile_file, format="csv").to_pandas()
 tile_cat = vdl.vlass_tile(subtile_cat)
 
 print("Loading the SOM and annotations")
@@ -140,7 +140,10 @@ annotation = pu.Annotator(som.path, results=annotations_file)
 
 # sdss = sky_chunk(df, (120, 240), (-10, 50))
 tiles = tile_cat.Tile.values
-tiles = tiles[:10]
+
+ti = int(sys.argv[1]) if len(sys.argv) >= 2 else 0
+num_tiles = int(sys.argv[2]) if len(sys.argv) >= 3 else 1
+tiles = tiles[ti : ti + num_tiles]
 
 for tile_id in tiles:
     print(f"Processing tile {tile_id}")
@@ -204,10 +207,12 @@ for tile_id in tiles:
     # /// Write to file \\\
     print("Writing the results to a file")
     comp_tab = Table.from_pandas(comp_cat)
-    comp_tab.write(comp_cat_name(tile_id, path=out_cat_path), format="votable")
+    cname = comp_cat_name(tile_id, path=out_cat_path)
+    comp_tab.write(cname, format="votable", overwrite=True)
 
     src_tab = Table.from_pandas(src_cat)
-    src_tab.write(src_cat_name(tile_id, path=out_cat_path), format="votable")
+    sname = src_cat_name(tile_id, path=out_cat_path)
+    src_tab.write(sname, format="votable", overwrite=True)
 
 
 # /// Memory cleanup \\\
@@ -219,10 +224,10 @@ del radio_cat, som, annotation
 final_file = "CIRADA_VLASS1QL_table4_complex_sources_v01.xml"
 tile_cats = [src_cat_name(tile_id, path=out_cat_path) for tile_id in tiles]
 final_cat = stack_catalogues(tile_cats, path="")
-final_cat.write(final_file, format="votable")
+final_cat.write(final_file, format="votable", overwrite=True)
 
 # /// Stack component catalogues \\\
 final_file = "CIRADA_VLASS1QL_table1_components_som_v01.xml"
 tile_cats = [comp_cat_name(tile_id, path=out_cat_path) for tile_id in tiles]
 final_cat = stack_catalogues(tile_cats, path="")
-final_cat.write(final_file, format="votable")
+final_cat.write(final_file, format="votable", overwrite=True)
