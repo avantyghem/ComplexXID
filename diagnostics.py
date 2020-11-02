@@ -4,6 +4,7 @@ import os, sys
 from collections import Counter
 import argparse
 from itertools import product
+from typing import Callable, Iterator, Union, List, Set, Dict, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -11,11 +12,9 @@ import matplotlib.pyplot as plt
 from astropy import units as u
 from astropy.table import Table
 from astropy.coordinates import SkyCoord
-
 import pyink as pu
-from SOMSampler import SOMSampler
-from collation import create_wcs
-from typing import Callable, Iterator, Union, List, Set, Dict, Tuple, Optional
+
+# from collation import create_wcs
 
 
 def binary_names(tile_id, path=""):
@@ -23,6 +22,22 @@ def binary_names(tile_id, path=""):
     map_file = os.path.join(path, f"MAP_{tile_id}.bin")
     trans_file = os.path.join(path, f"TRANSFORM_{tile_id}.bin")
     return imbin_file, map_file, trans_file
+
+
+def create_wcs(ra, dec, imgsize, pixsize):
+    pixsize = u.Quantity(pixsize, u.deg)
+    hdr = fits.Header()
+    hdr["CRPIX1"] = imgsize // 2 + 0.5
+    hdr["CRPIX2"] = imgsize // 2 + 0.5
+    hdr["CDELT1"] = -pixsize.value
+    hdr["CDELT2"] = pixsize.value
+    hdr["PC1_1"] = 1
+    hdr["PC2_2"] = 1
+    hdr["CRVAL1"] = ra
+    hdr["CRVAL2"] = dec
+    hdr["CTYPE1"] = "RA---TAN"
+    hdr["CTYPE2"] = "DEC--TAN"
+    return WCS(hdr)
 
 
 def neuron_img_comp(somset, imgs, sampler, outpath=""):
@@ -36,19 +51,23 @@ def neuron_img_comp(somset, imgs, sampler, outpath=""):
     b1 = (neuron_shape - img_shape) // 2
     b2 = b1 + img_shape
 
-    # neuron = 0
-    # ind = sampler.points[neuron]
     for neuron, ind in enumerate(sampler.points):
         # Plot neuron
         somset.som.plot_neuron(ind)
         f1 = plt.gcf()
         plt.xticks([])
         plt.yticks([])
+
+        radio_img = somset.som[ind][0]
+        levels = np.linspace(0.25 * radio_img.max(), radio_img.max(), 4)
+        f1.axes[1].contour(radio_img, levels=levels, colors="white", linewidths=0.5)
+
         f1.axes[0].set_xlim([b1, b2])
         f1.axes[0].set_ylim([b2, b1])
         for ax in f1.axes:
             ax.axvline(neuron_shape / 2, c="r", ls="--", lw=1)
             ax.axhline(neuron_shape / 2, c="r", ls="--", lw=1)
+
         f1.savefig(f"{path.path}/neuron_{neuron}.png")
         plt.close(f1)
 
@@ -72,6 +91,13 @@ def neuron_img_comp(somset, imgs, sampler, outpath=""):
             for ax in f2.axes:
                 ax.axvline(img_shape / 2, c="r", ls="--", lw=1)
                 ax.axhline(img_shape / 2, c="r", ls="--", lw=1)
+
+            bmu_idx = somset.mapping.bmu(idx)
+            tkey = somset.transform.data[(idx, *bmu_idx)]
+            radio_img = imgs.data[idx, 0]
+            radio_img = pu.pink_spatial_transform(radio_img, tkey)
+            levels = np.linspace(0.25 * radio_img.max(), radio_img.max(), 4)
+            f2.axes[1].contour(radio_img, levels=levels, colors="white", linewidths=0.5)
 
             f2.savefig(f"{path.path}/neuron_{neuron}_img{i}.png")
             plt.close(f2)
@@ -586,15 +612,17 @@ def get_src_img(pos, survey, angular=None, level=0, **kwargs):
 def som_counts(somset, show_counts=False):
     # Add an outfile
     counts = somset.mapping.bmu_counts()
-    fig, ax = plt.subplots(1, 1, constrained_layout=True)
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8), constrained_layout=True)
     cim = ax.imshow(counts)
 
-    fig.colorbar(cim, label="Counts per Neuron")
+    cbar = fig.colorbar(cim)
+    cbar.set_label("Counts per Neuron", fontsize=16)
+    # cbar.ax.tick_params(labelsize=16)
 
     if show_counts:
         for row in range(somset.mapping.data.shape[1]):
             for col in range(somset.mapping.data.shape[2]):
-                plt.text(
+                ax.text(
                     col,
                     row,
                     f"{counts[row, col]:.0f}",
@@ -621,48 +649,29 @@ def update_component_catalogue(df, somset):
     return df
 
 
-def init_somset(som_file, map_file=None, trans_file=None):
-    """Initialize the SOMSet, which contains the SOM, mapping,
-    and transform files.
-
-    Args:
-        som_file (str): Name of the SOM file.
-        map_file (str, optional): Name of the mapping file. Defaults to None, 
-        in which case it follows the default naming scheme.
-        trans_file (str, optional): Name of the transform file. Defaults to None.
-
-    Returns:
-        pu.SOMSet: A container holding the SOM, mapping, and transform files.
-    """
-    som = pu.SOM(som_file)
-
-    if map_file is None:
-        map_file = som_file.replace(".bin", "_Similarity.bin")
-    mapping = pu.Mapping(map_file)
-
-    if trans_file is None:
-        trans_file = map_file.replace("_Similarity.bin", "_Transform.bin")
-    transform = pu.Transform(trans_file)
-
-    somset = pu.SOMSet(som=som, mapping=mapping, transform=transform)
-    return somset
-
-
-# def set_filenames(som_file, map_file=None, trans_file=None, outbase=None):
-#     if map_file is None:
-#         map_file = som_file.replace(".bin", "_Similarity.bin")
-#     if trans_file is None:
-#         trans_file = map_file.replace("_Similarity.bin", "_Transform.bin")
-
-
 def dist_hist(
-    df, neuron=None, density=False, bins=100, loglog=True, ax=None, labels=True
+    somset,
+    df=None,
+    neuron=None,
+    density=False,
+    bins=100,
+    loglog=True,
+    ax=None,
+    labels=True,
 ):
+    # if neuron is not None:
+    #     df = df[df.bmu_tup == neuron]
+    #     bmu_ed = df["bmu_ed"]
+
+    bmu = somset.mapping.bmu()
+    bmu_ed = somset.mapping.bmu_ed()
     if neuron is not None:
-        df = df[df.bmu_tup == neuron]
+        mask = np.array([bmu_i == neuron for bmu_i in bmu])
+        bmu_ed = bmu_ed[mask]
+
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(7, 6), constrained_layout=True)
-    ax.hist(df["bmu_ed"], bins=bins, density=density)
+    ax.hist(bmu_ed, bins=bins, density=density)
     if loglog:
         ax.loglog()
     if labels:
@@ -696,12 +705,23 @@ def dist_stats(somset):
     stds = np.zeros(Y.shape)
 
     for neuron in neurons:
+        # print(neuron)
         inds = somset.mapping.images_with_bmu(neuron)
+        if len(inds) == 0:
+            continue
         ed = somset.mapping.bmu_ed(inds)
         dists[neuron[0], neuron[1]] = np.percentile(ed, 50)
         stds[neuron[0], neuron[1]] = np.percentile(ed, 67) - np.percentile(ed, 33)
 
     return dists, stds
+
+
+def distance_sampling(somset, N=10):
+    inds = np.argsort(somset.mapping.bmu_ed())
+    low = inds[:N]
+    med = inds[len(inds) // 2 - N // 2 : len(inds) // 2 + N // 2]
+    high = inds[-N:][::-1]
+    return low, med, high
 
 
 def plot_dist_stats(somset):
@@ -726,6 +746,11 @@ def neuron_stats(somset):
     neuron_stats["freq"] = np.array(bmu_counts.flatten(), dtype=int)
     neuron_stats["idx"] = list(zip(neuron_stats.row.values, neuron_stats.col.values))
     return neuron_stats
+
+
+def total_image_flux(imgs):
+    summed = imgs.data.reshape(-1, 2, np.product(imgs.data.shape[-2:]))
+    return summed.sum(axis=2)
 
 
 def worst_matches(df=None, somset=None, N=None, frac=None, neuron=None):
@@ -753,12 +778,39 @@ def worst_matches(df=None, somset=None, N=None, frac=None, neuron=None):
     return df
 
 
+def init_somset(som_file, map_file=None, trans_file=None):
+    """Initialize the SOMSet, which contains the SOM, mapping,
+    and transform files.
+
+    Args:
+        som_file (str): Name of the SOM file.
+        map_file (str, optional): Name of the mapping file. Defaults to None, 
+        in which case it follows the default naming scheme.
+        trans_file (str, optional): Name of the transform file. Defaults to None.
+
+    Returns:
+        pu.SOMSet: A container holding the SOM, mapping, and transform files.
+    """
+    som = pu.SOM(som_file)
+
+    if map_file is None:
+        map_file = som_file.replace("SOM", "MAP")
+    mapping = pu.Mapping(map_file)
+
+    if trans_file is None:
+        trans_file = map_file.replace("MAP", "TRANSFORM")
+    transform = pu.Transform(trans_file)
+
+    somset = pu.SOMSet(som=som, mapping=mapping, transform=transform)
+    return somset
+
+
 def parse_args():
     """
     Parse input arguments
     """
     parser = argparse.ArgumentParser(description="Download VLASS and unWISE cutouts.")
-    parser.add_argument("sample_file", help="Name of the radio sample table")
+    # parser.add_argument("sample_file", help="Name of the radio sample table")
     parser.add_argument("imbin_file", help="Name of the image binary")
     parser.add_argument("som_file", help="Name of the SOM file")
     parser.add_argument(
@@ -795,30 +847,54 @@ if __name__ == "__main__":
 
     # Initialize the sample DataFrame, ImageReader, and SOM
     # files = set_filenames(args.som_file, args.map_file, args.trans_file, args.outbase)
-    df = pd.read_csv(args.sample_file)
-    imbin = pu.ImageReader(args.imbin_file)
+
+    # df = pd.read_csv(args.sample_file)
+    imgs = pu.ImageReader(args.imbin_file)
     somset = init_somset(args.som_file, args.map_file, args.trans_file)
     path = pu.PathHelper(args.outpath)
 
     # Only keep the records that preprocessed successfully
-    df = df.loc[imbin.records].reset_index(drop=True)
-    df = update_component_catalogue(df, somset)
+    # df = df.loc[imgs.records].reset_index(drop=True)
+    # df = update_component_catalogue(df, somset)
 
     som_counts(somset, show_counts=True)
     plt.savefig(f"{path}/bmu_frequency.png")
-    # plot_image(imbin, df=df, somset=somset, show_bmu=True, apply_transform=True)
+    # plot_image(imgs, df=df, somset=somset, show_bmu=True, apply_transform=True)
 
-    dist_hist(df, labels=True)
-    plt.savefig(f"{path}/euc_distance_hist.png")
+    # dist_hist(df, labels=True)
+    # plt.savefig(f"{path}/euc_distance_hist.png")
 
-    dist_hist_2d(df, somset, bins=100, loglog=False)
-    plt.savefig(f"{path}/euc_distance_hist_2d.png", dpi=somset.som.som_shape[0] * 25)
+    # dist_hist_2d(df, somset, bins=100, loglog=False)
+    # plt.savefig(f"{path}/euc_distance_hist_2d.png", dpi=somset.som.som_shape[0] * 25)
 
     # # Restrict sample to a specific bmu
     # neuron = (9, 1)
     # selection = df[df.bmu_tup == neuron]
-    # plot_image(imbin, df=selection, somset=somset, apply_transform=True, show_bmu=True)
+    # plot_image(imgs, df=selection, somset=somset, apply_transform=True, show_bmu=True)
 
-    nstats = neuron_stats(somset)
-    worst = worst_matches(df)
-    worst.to_csv(f"{path}/worst_matches.csv")
+    # nstats = neuron_stats(somset)
+    # worst = worst_matches(df)
+    # worst.to_csv(f"{path}/worst_matches.csv")
+
+total_flux = total_image_flux(imgs)
+bmu_ed = somset.mapping.bmu_ed()
+
+for i in range(total_flux.shape[1]):
+    plt.clf()
+    chan_tot = total_flux[:, i]
+    name = ["Radio", "IR"][i]
+    plt.hist2d(np.log10(chan_tot), np.log10(bmu_ed), bins=100)
+    plt.xlabel(f"Sum of {name} pixels")
+    plt.ylabel("log(Euc Dist)")
+    plt.colorbar()
+    plt.savefig(f"EucDist_{name}_hist2d.png")
+    plt.close()
+
+fig, ax = plt.subplots(1, 1)
+dist_hist(somset, ax=ax, loglog=True, labels=True)
+plt.savefig(f"EucDist_hist_loglog.png")
+
+fig, ax = plt.subplots(1, 1)
+dist_hist(somset, ax=ax, loglog=False, labels=True)
+plt.yscale("log")
+plt.savefig(f"EucDist_hist_loglin.png")

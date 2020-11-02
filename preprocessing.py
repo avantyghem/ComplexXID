@@ -17,6 +17,7 @@ from tqdm import tqdm as tqdm
 from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
+from astropy.convolution import convolve, Gaussian2DKernel
 from reproject import reproject_interp
 
 import pyink as pu
@@ -80,6 +81,43 @@ def ir_preprocess(data):
     return img_scale.astype(np.float32)
 
 
+def preprocess_hull(radio_data, ir_data, sigma=10, threshold=0.05):
+    radio_pp = radio_preprocess(radio_data)
+    ir_pp = ir_preprocess(ir_data)
+    hull = pu.convex_hull_smoothed(radio_pp, sigma, threshold)
+    ir_pp = ir_pp * hull
+    return radio_pp, ir_pp
+
+
+# def new_masking(data, sigma=10):
+#     sigma = 10
+#     g2d_amp = 1 / (2 * np.pi * sigma * sigma)
+#     hull = pu.convex_hull(data)
+#     mask = convolve(hull.astype(np.float32), Gaussian2DKernel(sigma)) > 0.01
+#     gmask = convolve(data, Gaussian2DKernel(sigma)) > 0.5 * g2d_amp
+#     mask = pu.convex_hull_smoothed(data, sigma, 0.05)
+
+
+def check_radio_data(data, idx):
+    if np.sum(~np.isfinite(e_new_data)) > 0:
+        print(f"Skipping index {idx} due to too many NaN")
+        return False
+    if np.max(e_new_data) <= 0:
+        print(f"Skipping index {idx} due to no positive values")
+        return False
+    return True
+
+
+def check_ir_data(data, idx):
+    if np.sum(~np.isfinite(data)) > 0:
+        print(f"Skipping index {idx} due to too many NaN in IR channel")
+        return False
+    if np.max(data) <= 0:
+        print(f"Skipping index {idx} due to no positive values in IR channel")
+        return False
+    return True
+
+
 def vlass_preprocessing(
     idx,
     tab,
@@ -89,7 +127,7 @@ def vlass_preprocessing(
     ir_path="",
     radio_fname_col="filename",
     ir_fname_col="ir_filename",
-    ir_weight=0.05,
+    ir_weight=0.5,
 ):
     """Preprocess a single VLASS image. 
     Do not worry about parallelization yet.
@@ -142,28 +180,21 @@ def vlass_preprocessing(
     e_new_data = radio_preprocess(e_new_data)
     dlist.close()
 
-    if np.sum(~np.isfinite(e_new_data)) > 0:
-        print(f"Skipping index {idx} due to too many NaN")
-        return None
-    if np.max(e_new_data) <= 0:
-        print(f"Skipping index {idx} due to no positive values")
+    if not check_radio_data(e_new_data, idx):
         return None
 
     if ir is False:
-        return (idx, np.array([e_new_data]))
+        return (idx, np.array([radio_preprocess(e_new_data)]))
 
     w_new_data, w_new_footprint = reproject_interp(
         w, reproject_wcs, shape_out=img_size[1:]
     )
 
     w_new_data = ir_preprocess(w_new_data)
+    w_new_data *= pu.convex_hull_smoothed(e_new_data, 10, 0.05)
     wlist.close()
 
-    if np.sum(~np.isfinite(w_new_data)) > 0:
-        print(f"Skipping index {idx} due to too many NaN in IR channel")
-        return None
-    if np.max(w_new_data) <= 0:
-        print(f"Skipping index {idx} due to no positive values in IR channel")
+    if not check_data(w_new_data, idx):
         return None
 
     return (idx, np.array((e_new_data * (1 - ir_weight), w_new_data * ir_weight)))
@@ -257,7 +288,7 @@ if __name__ == "__main__":
     main(
         df,
         args.outfile,
-        img_size=(2, 500, 500),
+        img_size=(2, 300, 300),
         img_path=args.img_path,
         threads=args.threads,
     )

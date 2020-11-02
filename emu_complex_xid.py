@@ -87,6 +87,18 @@ def stack_catalogues(stack, path=""):
     return final_cat
 
 
+def load_tile_catalogues(
+    out_cat_path, radio_cat, tile_cat, coad_summary, ir_data_path, tile_id
+):
+    radio_sample = None
+    ir_cat = None
+    return radio_sample, ir_cat
+
+
+def prepare_tile_catalogues():
+    return None, None
+
+
 # /// Input Info \\\
 overwrite = True
 
@@ -136,13 +148,9 @@ tiles = tile_cat.Tile.values
 tiles = tiles[:10]
 
 for tile_id in tiles:
-    print(f"Processing tile {tile_id}")
+    # Prepare data -- Make sure catalogues are saved and cutouts exist
     imbin_file, map_file, trans_file = cxc.binary_names(tile_id, path=out_bin_path)
-
-    # Load EMU and WISE catalogues
-    radio_sample, ir_cat = load_tile_catalogues(
-        out_cat_path, radio_cat, tile_cat, coad_summary, ir_data_path, tile_id
-    )
+    radio_sample, ir_cat = prepare_tile_catalogues()
 
     # /// Acquire Data \\\
     tile_cutout_path = os.path.join(cutout_path, tile_id)
@@ -162,6 +170,16 @@ for tile_id in tiles:
             imgsize_arcmin=5.0,
             imgsize_pix=150,
         )
+
+for tile_id in tiles:
+    # Process everything
+    print(f"Processing tile {tile_id}")
+    imbin_file, map_file, trans_file = cxc.binary_names(tile_id, path=out_bin_path)
+
+    # Load EMU and WISE catalogues
+    radio_sample, ir_cat = load_tile_catalogues(
+        out_cat_path, radio_cat, tile_cat, coad_summary, ir_data_path, tile_id
+    )
 
     # Preprocess, map, and collate
     comp_cat, src_cat = cxc.run_all(
