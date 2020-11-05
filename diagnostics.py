@@ -876,25 +876,25 @@ if __name__ == "__main__":
     # worst = worst_matches(df)
     # worst.to_csv(f"{path}/worst_matches.csv")
 
-total_flux = total_image_flux(imgs)
-bmu_ed = somset.mapping.bmu_ed()
+    total_flux = total_image_flux(imgs)
+    bmu_ed = somset.mapping.bmu_ed()
 
-for i in range(total_flux.shape[1]):
-    plt.clf()
-    chan_tot = total_flux[:, i]
-    name = ["Radio", "IR"][i]
-    plt.hist2d(np.log10(chan_tot), np.log10(bmu_ed), bins=100)
-    plt.xlabel(f"Sum of {name} pixels")
-    plt.ylabel("log(Euc Dist)")
-    plt.colorbar()
-    plt.savefig(f"EucDist_{name}_hist2d.png")
-    plt.close()
+    for i in range(total_flux.shape[1]):
+        plt.clf()
+        chan_tot = total_flux[:, i]
+        name = ["Radio", "IR"][i]
+        plt.hist2d(np.log10(chan_tot), np.log10(bmu_ed), bins=100)
+        plt.xlabel(f"Sum of {name} pixels")
+        plt.ylabel("log(Euc Dist)")
+        plt.colorbar()
+        plt.savefig(f"EucDist_{name}_hist2d.png")
+        plt.close()
 
-fig, ax = plt.subplots(1, 1)
-dist_hist(somset, ax=ax, loglog=True, labels=True)
-plt.savefig(f"EucDist_hist_loglog.png")
+    fig, ax = plt.subplots(1, 1)
+    dist_hist(somset, ax=ax, loglog=True, labels=True)
+    plt.savefig(f"EucDist_hist_loglog.png")
 
-fig, ax = plt.subplots(1, 1)
-dist_hist(somset, ax=ax, loglog=False, labels=True)
-plt.yscale("log")
-plt.savefig(f"EucDist_hist_loglin.png")
+    fig, ax = plt.subplots(1, 1)
+    dist_hist(somset, ax=ax, loglog=False, labels=True)
+    plt.yscale("log")
+    plt.savefig(f"EucDist_hist_loglin.png")

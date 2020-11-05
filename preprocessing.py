@@ -45,7 +45,7 @@ def add_filename(objname, survey="DECaLS-DR8", format="fits"):
     return filename
 
 
-def radio_preprocess(data, lower=3):
+def radio_preprocess(data, lower=3, min_isl_pix=5):
     remove_zeros = data[data != 0]  # data.flatten()
     noise = pu.rms_estimate(remove_zeros, mode="mad", clip_rounds=2)
 
@@ -54,7 +54,7 @@ def radio_preprocess(data, lower=3):
 
     img_scale = np.zeros_like(data)
     for i, mask in enumerate(pu.island_segmentation(data, 3 * noise)):
-        if np.sum(mask) <= 5:
+        if np.sum(mask) <= min_isl_pix:
             continue
 
         img_scale[mask] = pu.minmax(np.log10(data[mask]))
@@ -99,10 +99,10 @@ def preprocess_hull(radio_data, ir_data, sigma=10, threshold=0.05):
 
 
 def check_radio_data(data, idx):
-    if np.sum(~np.isfinite(e_new_data)) > 0:
+    if np.sum(~np.isfinite(data)) > 0:
         print(f"Skipping index {idx} due to too many NaN")
         return False
-    if np.max(e_new_data) <= 0:
+    if np.max(data) <= 0:
         print(f"Skipping index {idx} due to no positive values")
         return False
     return True
@@ -127,7 +127,7 @@ def vlass_preprocessing(
     ir_path="",
     radio_fname_col="filename",
     ir_fname_col="ir_filename",
-    ir_weight=0.5,
+    ir_weight=0.25,
 ):
     """Preprocess a single VLASS image. 
     Do not worry about parallelization yet.
@@ -177,7 +177,7 @@ def vlass_preprocessing(
         d, reproject_wcs, shape_out=img_size[1:]
     )
 
-    e_new_data = radio_preprocess(e_new_data)
+    e_new_data = radio_preprocess(e_new_data, min_isl_pix=15)
     dlist.close()
 
     if not check_radio_data(e_new_data, idx):
@@ -191,10 +191,10 @@ def vlass_preprocessing(
     )
 
     w_new_data = ir_preprocess(w_new_data)
-    w_new_data *= pu.convex_hull_smoothed(e_new_data, 10, 0.05)
+    w_new_data *= pu.convex_hull_smoothed(e_new_data, 15, 0.05)
     wlist.close()
 
-    if not check_data(w_new_data, idx):
+    if not check_ir_data(w_new_data, idx):
         return None
 
     return (idx, np.array((e_new_data * (1 - ir_weight), w_new_data * ir_weight)))
@@ -245,6 +245,14 @@ def parse_args():
         default=cpu_count(),
         type=int,
     )
+    parser.add_argument(
+        "-s",
+        "--size",
+        dest="img_size",
+        help="Number of pixels in the input image.",
+        default=300,
+        type=int,
+    )
     args = parser.parse_args()
     return args
 
@@ -288,7 +296,7 @@ if __name__ == "__main__":
     main(
         df,
         args.outfile,
-        img_size=(2, 300, 300),
+        img_size=(2, args.img_size, args.img_size),
         img_path=args.img_path,
         threads=args.threads,
     )
