@@ -34,18 +34,18 @@ def sample_percentile(sample, perc, fill_bad=-1):
 
 def neuron_info(neuron, som, comp_cat, src_cat=None):
     # comp_cat: pd.DataFrame
-    sample = comp_cat[comp_cat["bmu"] == neuron]
+    sample = comp_cat[comp_cat["Best_neuron"] == neuron]
     bmu_counts = len(sample)
 
     radio_sum = som[neuron][0].sum()
     ir_sum = som[neuron][1].sum()
 
     # Should these be _component_ or _source_ distributions?
-    ed_0 = sample_percentile(sample["ed"], 0)
-    ed_25 = sample_percentile(sample["ed"], 25)
-    ed_50 = sample_percentile(sample["ed"], 50)
-    ed_75 = sample_percentile(sample["ed"], 75)
-    ed_100 = sample_percentile(sample["ed"], 100)
+    ed_0 = sample_percentile(sample["Euc_dist"], 0)
+    ed_25 = sample_percentile(sample["Euc_dist"], 25)
+    ed_50 = sample_percentile(sample["Euc_dist"], 50)
+    ed_75 = sample_percentile(sample["Euc_dist"], 75)
+    ed_100 = sample_percentile(sample["Euc_dist"], 100)
 
     info_tab = OrderedDict(
         Neuron_ID=neuron,
@@ -130,16 +130,18 @@ src_cat = Table.read("CIRADA_VLASS1QL_table4_complex_sources_v01.xml")
 src_cat = src_cat.to_pandas()
 
 comp_cat = comp_cat.to_pandas()
-comp_cat["bmu"] = list(zip(comp_cat["bmu_y"], comp_cat["bmu_x"]))
+comp_cat["Best_neuron"] = list(
+    zip(comp_cat["Best_neuron_y"], comp_cat["Best_neuron_x"])
+)
 # comp_cat = Table.from_pandas(comp_cat_df)
 
 src_cat["Best_neuron"] = list(map(load_as_tuple, src_cat["Best_neuron"]))
-src_cat["Component_names"] = [
-    json.loads(src["Component_names"].replace("'", '"'))
-    for i, src in src_cat.iterrows()
-]
-src_cat["Component_name"] = [src["Component_names"][0] for i, src in src_cat.iterrows()]
-src_cat = pd.merge(src_cat, comp_cat[["Component_name", "flip", "angle"]], how="left")
+# src_cat["Component_names"] = [
+#     json.loads(src["Component_names"].replace("'", '"'))
+#     for i, src in src_cat.iterrows()
+# ]
+# src_cat["Component_name"] = [src["Component_names"][0] for i, src in src_cat.iterrows()]
+# src_cat = pd.merge(src_cat, comp_cat[["Component_name", "flip", "angle"]], how="left")
 
 # top_comp = [json.loads(src["Component_names"].replace("'", '"'))[0] for src in src_cat]
 # with src_cat.context_rename_columns(['a', 'b'], ['A', 'B']):
@@ -180,6 +182,9 @@ some_radio = neuron_cat.Radio_area > 0
 ambig_mask = ~neuron_cat.Ambiguous_IR
 good_neurons = ~no_ir & some_radio & ambig_mask
 
+neuron_cat["Area_ratio"] = neuron_cat.Radio_area / neuron_cat.IR_area
+large_ar = neuron_cat.Area_ratio >= 2
+
 matches_mask = neuron_cat.N_matches >= np.percentile(neuron_cat.N_matches, 67)
 ir_dist_mask = neuron_cat.IR_area < np.percentile(neuron_cat[~no_ir].IR_area, 50)
 
@@ -191,8 +196,6 @@ possible_pair = (
     & (neuron_cat.IR_sum > np.percentile(neuron_cat.IR_sum, 50))
 )
 
-neuron_cat["Area_ratio"] = neuron_cat.Radio_area / neuron_cat.IR_area
-large_ar = neuron_cat.Area_ratio >= 2
 
 # True doubles:
 # Large radio. IR might be large, as it can be smeared out. Area_ratio > 1
@@ -217,7 +220,7 @@ plt.imshow(img_positions(choices, som.som_shape[0]))
 # choices = [tuple(ki) for ki in km.cluster_centers_.astype(int)]
 
 
-path = pu.PathHelper("Zoo2")
+path = pu.PathHelper("Zoo_revised")
 for neuron in choices:
     plt.close("all")
     som.plot_neuron(neuron)
@@ -248,7 +251,7 @@ doubles = [
     (34, 32),
 ]
 
-pairs = []
+# pairs = []
 
 final = [
     # (0, 10),
@@ -321,7 +324,9 @@ def filename(src_name):
 
 def sample_neurons(src_cat, neurons, n_samples=10):
     for neuron in neurons:
-        subset = src_cat[src_cat["Best_neuron"] == neuron].sample(n_samples)
+        subset = src_cat[src_cat["Best_neuron"] == neuron]
+        if len(subset) > n_samples:
+            subset = subset.sample(n_samples)
         try:
             stacked = pd.concat([stacked, subset])
         except NameError:
@@ -331,10 +336,10 @@ def sample_neurons(src_cat, neurons, n_samples=10):
 
 # TODO: Randomly sample 10 images for each neuron in `final`.
 subset = sample_neurons(src_cat, final)
-subset["filename"] = [filename(src.Component_name) for i, src in subset.iterrows()]
+subset["filename"] = [filename(src.Source_name) for i, src in subset.iterrows()]
 subset[["Source_name", "Component_name", "filename"]].to_csv(f"{path.path}/sample.csv")
 
 for idx, src in subset.iterrows():
     plt.close("all")
     plot_zoo_source(src_cat, annotation, idx, file_path="images")
-    plt.savefig(f"{path.new_images}/{filename(src.Component_name)}")
+    plt.savefig(f"{path.new_images}/{filename(src.Source_name)}")

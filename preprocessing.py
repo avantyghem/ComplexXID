@@ -46,6 +46,7 @@ def add_filename(objname, survey="DECaLS-DR8", format="fits"):
 
 
 def radio_preprocess(data, lower=3, min_isl_pix=5):
+    data[np.isnan(data)] = 0
     remove_zeros = data[data != 0]  # data.flatten()
     noise = pu.rms_estimate(remove_zeros, mode="mad", clip_rounds=2)
 
@@ -53,7 +54,9 @@ def radio_preprocess(data, lower=3, min_isl_pix=5):
     # data[empty] = np.random.normal(0, noise, np.sum(empty))
 
     img_scale = np.zeros_like(data)
-    for i, mask in enumerate(pu.island_segmentation(data, 3 * noise)):
+    for i, mask in enumerate(
+        pu.island_segmentation(data - np.median(remove_zeros), 3 * noise)
+    ):
         if np.sum(mask) <= min_isl_pix:
             continue
 
@@ -127,7 +130,7 @@ def vlass_preprocessing(
     ir_path="",
     radio_fname_col="filename",
     ir_fname_col="ir_filename",
-    ir_weight=0.25,
+    ir_weight=0.05,
 ):
     """Preprocess a single VLASS image. 
     Do not worry about parallelization yet.
@@ -191,7 +194,7 @@ def vlass_preprocessing(
     )
 
     w_new_data = ir_preprocess(w_new_data)
-    w_new_data *= pu.convex_hull_smoothed(e_new_data, 15, 0.05)
+    # w_new_data *= pu.convex_hull_smoothed(e_new_data, 15, 0.05)
     wlist.close()
 
     if not check_ir_data(w_new_data, idx):

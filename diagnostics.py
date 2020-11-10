@@ -655,7 +655,7 @@ def dist_hist(
     neuron=None,
     density=False,
     bins=100,
-    loglog=True,
+    log=True,
     ax=None,
     labels=True,
 ):
@@ -671,11 +671,14 @@ def dist_hist(
 
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(7, 6), constrained_layout=True)
+
+    if log:
+        bmu_ed = np.log10(bmu_ed)
     ax.hist(bmu_ed, bins=bins, density=density)
-    if loglog:
-        ax.loglog()
+    ax.set_yscale("log")
     if labels:
-        ax.set_xlabel("Euclidean Distance", fontsize=16)
+        xlabel = "Euclidean Distance" if not log else f"log(Euclidean Distance)"
+        ax.set_xlabel(xlabel, fontsize=16)
         ax.set_ylabel(r"$N$", fontsize=16)
 
 
@@ -891,10 +894,5 @@ if __name__ == "__main__":
         plt.close()
 
     fig, ax = plt.subplots(1, 1)
-    dist_hist(somset, ax=ax, loglog=True, labels=True)
+    dist_hist(somset, ax=ax, log=True, labels=True)
     plt.savefig(f"EucDist_hist_loglog.png")
-
-    fig, ax = plt.subplots(1, 1)
-    dist_hist(somset, ax=ax, loglog=False, labels=True)
-    plt.yscale("log")
-    plt.savefig(f"EucDist_hist_loglin.png")

@@ -37,6 +37,7 @@ import subprocess
 import numpy as np
 import pandas as pd
 from astropy.table import Table
+import pdb
 
 from legacy_survey_cutout_fetcher import grab_cutouts
 import pyink as pu
@@ -234,7 +235,6 @@ def collate(
     comp_name_col="Component_name",
 ):
     # /// Collate Sources \\\
-    # TODO: Convert to VOtables
     src_cat = collation.main(
         radio_sample,
         ir_cat,
@@ -253,6 +253,16 @@ def collate(
     # Probably not a problem, since it can be joined normally with the original
     comp_cat = collation.component_table(radio_sample.loc[imgs.records], somset)
     comp_cat = comp_cat.merge(comp_src_map, on=comp_name_col)
+    comp_cat.Flip = comp_cat.Flip.astype("int32")
+
+    src_cat = pd.merge(
+        src_cat,
+        comp_cat[["Component_name", "Flip", "Angle"]],
+        left_on="Best_component",
+        right_on="Component_name",
+    )
+    del src_cat["Component_name"]
+
     return comp_cat, src_cat
 
 
@@ -329,7 +339,6 @@ def run_all(
         sorter_mode=sorter_mode,
         pix_scale=pix_scale,
     )
-    comp_cat.flip = comp_cat.flip.astype("int32")
     print("...done")
 
     return comp_cat, src_cat

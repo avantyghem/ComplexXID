@@ -62,8 +62,10 @@ def plot_source(source, img_size=300, file_path="images", use_wcs=False):
         file_path, add_filename(source["Source_name"], survey="unWISE_NEO4")
     )
 
-    ra = json.loads(source["RA_components"])[0]
-    dec = json.loads(source["DEC_components"])[0]
+    # ra = json.loads(source["RA_components"])[0]
+    # dec = json.loads(source["DEC_components"])[0]
+    ra = source["RA_source"]
+    dec = source["DEC_source"]
 
     lscf.grab_cutout(
         ra, dec, vlass_tile, survey="vlass1.2", imgsize_arcmin=3.0, imgsize_pix=300,
@@ -100,6 +102,13 @@ def plot_source(source, img_size=300, file_path="images", use_wcs=False):
     for ax in axes:
         ax.scatter(img_size / 2, img_size / 2, marker="c", c="w", s=200)
 
+    if use_wcs:
+        ra = json.loads(src.RA_components)
+        dec = json.loads(src.DEC_components)
+        axes[0].scatter(
+            ra, dec, marker=".", c="r", s=100, transform=axes[0].get_transform("world")
+        )
+
 
 def prepare_zoo_image(src_cat, annotation, src_id, file_path="images"):
     # Add channel masks
@@ -121,7 +130,7 @@ def prepare_zoo_image(src_cat, annotation, src_id, file_path="images"):
         filter_excludes=labels["Sidelobe"],
     ).astype(np.float32)
     radio_mask = pu.pink_spatial_transform(
-        radio_mask, (src["flip"], src["angle"]), reverse=True
+        radio_mask, (src["Flip"], src["Angle"]), reverse=True
     )
     radio_mask = trim_neuron(radio_mask, 300)
     radio_mask = radio_mask >= 0.1
@@ -133,7 +142,7 @@ def prepare_zoo_image(src_cat, annotation, src_id, file_path="images"):
         filter_excludes=labels["Sidelobe"],
     ).astype(np.float32)
     ir_mask = pu.pink_spatial_transform(
-        ir_mask, (src["flip"], src["angle"]), reverse=True
+        ir_mask, (src["Flip"], src["Angle"]), reverse=True
     )
     ir_mask = trim_neuron(ir_mask, 300)
     ir_mask = ir_mask >= 0.1

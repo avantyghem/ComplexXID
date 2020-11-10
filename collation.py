@@ -107,10 +107,12 @@ def source_info(
 
     # Radio position info
     components = radio_positions[np.array(subg)]
+    best_comp_pos = radio_positions[src_idx]
     mean_component = SkyCoord(components.cartesian.mean())
     comp_ra = [rs.ra.value for rs in components]
     comp_dec = [rs.dec.value for rs in components]
     radio_comps = radio_cat.iloc[subg]  # networkx resets numbering
+    best_comp = radio_cat.iloc[src_idx]
     comp_names = list(radio_comps[radio_name])
 
     # IR position info
@@ -126,13 +128,14 @@ def source_info(
     )
     peak_comp = radio_comps.Peak_flux.idxmax()
     euc_dist = somset.mapping.bmu_ed(src_idx)[0]
-
     # node_data = [G.nodes(data=True)[d] for d in subg]
+    # pdb.set_trace()
 
     source = OrderedDict(
-        RA_source=mean_component.ra.value,
-        DEC_source=mean_component.dec.value,
+        RA_source=best_comp_pos.ra.value,
+        DEC_source=best_comp_pos.dec.value,
         N_components=len(components),
+        Best_component=best_comp.Component_name,
         Component_names=comp_names,
         RA_components=comp_ra,
         DEC_components=comp_dec,
@@ -248,11 +251,11 @@ def component_table(radio_cat, somset, name_col="Component_name"):
     comp_tab = pd.DataFrame(
         {
             name_col: radio_cat[name_col],
-            "bmu_y": bmu[:, 0],
-            "bmu_x": bmu[:, 1],
-            "ed": euc_dist,
-            "flip": flip,
-            "angle": angle,
+            "Best_neuron_y": bmu[:, 0],
+            "Best_neuron_x": bmu[:, 1],
+            "Euc_dist": euc_dist,
+            "Flip": flip,
+            "Angle": angle,
         }
     )
     return comp_tab
