@@ -196,7 +196,7 @@ for tile_id in tiles:
         tile_cutout_path,
         bin_path=out_bin_path,
         img_size=(2, 300, 300),
-        numthreads=6,
+        numthreads=8,
         annotation=annotation,
         remove_tile_cutouts=False,
         cpu_only=False,
