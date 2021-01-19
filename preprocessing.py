@@ -241,6 +241,14 @@ def parse_args():
         type=str,
     )
     parser.add_argument(
+        "-w",
+        "--ir_weight",
+        dest="ir_weight",
+        help="The weighting to apply to the optical/IR channel",
+        default=0.05,
+        type=float,
+    )
+    parser.add_argument(
         "-t",
         "--threads",
         dest="threads",
@@ -260,13 +268,19 @@ def parse_args():
     return args
 
 
-def main(df, outfile, img_size, img_path, threads=None):
+def main(df, outfile, img_size, img_path, threads=None, ir_weight=0.05):
     if threads is None:
         threads = cpu_count()
 
     pool = Pool(processes=threads)
 
-    kwargs = dict(ir=True, img_size=img_size, radio_path=img_path, ir_path=img_path)
+    kwargs = dict(
+        ir=True,
+        img_size=img_size,
+        radio_path=img_path,
+        ir_path=img_path,
+        ir_weight=ir_weight,
+    )
     with pu.ImageWriter(outfile, 0, img_size, clobber=True) as pk_img:
         results = [
             pool.apply_async(vlass_preprocessing, args=(idx, df), kwds=kwargs)
@@ -293,13 +307,12 @@ if __name__ == "__main__":
             add_filename, survey=args.ir_survey
         )
 
-    # interested in `complex` objects
-    # outfile = "PINK_Binaries/Example_PINK_Binary.bin"
-    # emu = df[df["n_components"] > 1].index
     main(
         df,
         args.outfile,
         img_size=(2, args.img_size, args.img_size),
         img_path=args.img_path,
         threads=args.threads,
+        ir_weight=args.ir_weight,
     )
+
