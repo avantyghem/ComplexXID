@@ -246,11 +246,11 @@ def vlass_preprocessing(
         return None
 
     ir_prepro = ir_preprocess(ir_data)
-    if all_comps is not None:
-        ir_prepro *= comp_filter(all_comps, ra, dec, reproj_hdr)
-    # ir_prepro *= pu.convex_hull_smoothed(e_new_data, 15, 0.05)
     if not check_ir_data(ir_prepro, idx):
         return None
+    # ir_prepro *= pu.convex_hull_smoothed(e_new_data, 15, 0.05)
+    if all_comps is not None:
+        ir_prepro *= comp_filter(all_comps, ra, dec, reproj_hdr)
 
     return (idx, np.array((radio_prepro * (1 - ir_weight), ir_prepro * ir_weight)))
 
