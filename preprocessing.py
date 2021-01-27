@@ -17,6 +17,8 @@ from tqdm import tqdm as tqdm
 from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
+from astropy.modeling.models import Gaussian2D
+from astropy.coordinates import SkyCoord
 from astropy.convolution import convolve, Gaussian2DKernel
 from reproject import reproject_interp
 
@@ -101,6 +103,38 @@ def preprocess_hull(radio_data, ir_data, sigma=10, threshold=0.05):
 #     mask = pu.convex_hull_smoothed(data, sigma, 0.05)
 
 
+def comp_filter(all_comps, ra, dec, hdr, threshold=0.01):
+    # Get x, y posns of all radio comps in the image
+    # Use a convex hull based on radio comp posns
+    # Smooth with some gaussians
+    coord = SkyCoord(ra, dec, unit=u.deg)
+    all_coords = SkyCoord(
+        all_comps["RA"].data.data, all_comps["DEC"].data.data, unit=u.deg
+    )
+    max_sep = 0.5 * hdr["NAXIS2"] * hdr["CD2_2"] * 60 * u.arcmin
+    coord_inds = np.where(coord.separation(all_coords) <= max_sep)
+    comps_in_img = all_comps[coord_inds]
+    wcs = WCS(hdr)
+    x, y = wcs.all_world2pix(all_coords[coord_inds].ra, all_coords[coord_inds].dec, 0)
+
+    pix_size = hdr["CD2_2"] * 3600
+    Y, X = np.mgrid[: hdr["NAXIS1"], : hdr["NAXIS2"]]
+    mod = np.zeros(X.shape)
+    for xi, yi, comp in zip(x, y, comps_in_img):
+        major = comp["Maj"] / pix_size
+        minor = comp["Min"] / pix_size
+        pa = 90 - comp["PA"]
+        mod += Gaussian2D(
+            x_mean=xi,
+            y_mean=yi,
+            x_stddev=major / 2.355,
+            y_stddev=minor / 2.355,
+            theta=pa,
+        )(X, Y)
+    hull = pu.convex_hull(mod, threshold=threshold)
+    return hull
+
+
 def check_radio_data(data, idx):
     if np.sum(~np.isfinite(data)) > 0:
         print(f"Skipping index {idx} due to too many NaN")
@@ -121,6 +155,36 @@ def check_ir_data(data, idx):
     return True
 
 
+def load_fits(filename, ext=0):
+    hdulist = fits.open(filename)
+    d = hdulist[ext]
+    return d
+
+
+def load_radio_fits(filename, ext=0):
+    hdu = load_fits(filename, ext=ext)
+    wcs = WCS(hdu.header).celestial
+    hdu.data = np.squeeze(hdu.data)
+    hdu.header = wcs.to_header()
+    return hdu
+
+
+def recenter_regrid(hdu, ra, dec, img_size, reproj_hdr=None):
+    # Recentering the reference pixel
+    if reproj_hdr is None:
+        reproj_hdr = hdu.header.copy()
+    reproj_hdr["CRVAL1"] = ra
+    reproj_hdr["CRVAL2"] = dec
+    reproj_hdr["CRPIX1"] = img_size[0] // 2 + 0.5
+    reproj_hdr["CRPIX2"] = img_size[1] // 2 + 0.5
+    reproj_wcs = WCS(reproj_hdr).celestial
+
+    reproj_data, reproj_footprint = reproject_interp(
+        hdu, reproj_wcs, shape_out=img_size
+    )
+    return reproj_data
+
+
 def vlass_preprocessing(
     idx,
     tab,
@@ -130,77 +194,65 @@ def vlass_preprocessing(
     ir_path="",
     radio_fname_col="filename",
     ir_fname_col="ir_filename",
+    all_comps=None,
     ir_weight=0.05,
 ):
     """Preprocess a single VLASS image. 
-    Do not worry about parallelization yet.
     """
 
     radio_file = tab.loc[idx][radio_fname_col]
     radio_file = os.path.join(radio_path, radio_file)
+    ra = tab.loc[idx]["RA"]
+    dec = tab.loc[idx]["DEC"]
 
     try:
-        dlist = fits.open(radio_file)
-        d = dlist[0]
+        radio_hdu = load_radio_fits(radio_file)
     except:
         print(f"Failed to open image {radio_file}")
         return None
 
-    if d.header["NAXIS"] == 0:
+    if radio_hdu.header["NAXIS"] == 0:
         print(f"Empty image: {radio_file}")
         return None
 
-    d_wcs = WCS(d.header).celestial
-    d.data = np.squeeze(d.data)
-    d.header = d_wcs.to_header()
+    # d_wcs = WCS(radio_hdu.header).celestial
+    # radio_hdu.data = np.squeeze(radio_hdu.data)
+    # radio_hdu.header = d_wcs.to_header()
 
-    if ir:
-        ir_file = tab.loc[idx][ir_fname_col]
-        ir_file = os.path.join(ir_path, ir_file)
-
-        try:
-            wlist = fits.open(ir_file)
-            w = wlist[0]
-        except:
-            print(f"Failed to open image {ir_file}")
+    if not ir:
+        # Preprocess the radio only
+        radio_data = recenter_regrid(radio_hdu, ra, dec, img_size[1:])
+        radio_prepro = radio_preprocess(radio_data)
+        if not check_radio_data(radio_prepro, idx):
             return None
+        return (idx, np.array([radio_prepro]))
 
-        reproject_wcs = w.header.copy()
-    else:
-        reproject_wcs = d.header.copy()
+    # Process the IR data
+    ir_file = tab.loc[idx][ir_fname_col]
+    ir_file = os.path.join(ir_path, ir_file)
 
-    # Recentering the reference pixel
-    reproject_wcs["CRVAL1"] = tab.loc[idx]["RA"]
-    reproject_wcs["CRVAL2"] = tab.loc[idx]["DEC"]
-    reproject_wcs["CRPIX1"] = img_size[1] // 2 + 0.5
-    reproject_wcs["CRPIX2"] = img_size[2] // 2 + 0.5
-    reproject_wcs = WCS(reproject_wcs).celestial
-
-    e_new_data, e_new_footprint = reproject_interp(
-        d, reproject_wcs, shape_out=img_size[1:]
-    )
-
-    e_new_data = radio_preprocess(e_new_data, min_isl_pix=15)
-    dlist.close()
-
-    if not check_radio_data(e_new_data, idx):
+    try:
+        ir_hdu = load_fits(ir_file)
+    except:
+        print(f"Failed to open image {ir_file}")
         return None
 
-    if ir is False:
-        return (idx, np.array([radio_preprocess(e_new_data)]))
+    reproj_hdr = ir_hdu.header.copy()
+    radio_data = recenter_regrid(radio_hdu, ra, dec, img_size[1:], reproj_hdr)
+    ir_data = recenter_regrid(ir_hdu, ra, dec, img_size[1:], reproj_hdr)
 
-    w_new_data, w_new_footprint = reproject_interp(
-        w, reproject_wcs, shape_out=img_size[1:]
-    )
-
-    w_new_data = ir_preprocess(w_new_data)
-    # w_new_data *= pu.convex_hull_smoothed(e_new_data, 15, 0.05)
-    wlist.close()
-
-    if not check_ir_data(w_new_data, idx):
+    radio_prepro = radio_preprocess(radio_data, min_isl_pix=15)
+    if not check_radio_data(radio_prepro, idx):
         return None
 
-    return (idx, np.array((e_new_data * (1 - ir_weight), w_new_data * ir_weight)))
+    ir_prepro = ir_preprocess(ir_data)
+    if all_comps is not None:
+        ir_prepro *= comp_filter(all_comps, ra, dec, reproj_hdr)
+    # ir_prepro *= pu.convex_hull_smoothed(e_new_data, 15, 0.05)
+    if not check_ir_data(ir_prepro, idx):
+        return None
+
+    return (idx, np.array((radio_prepro * (1 - ir_weight), ir_prepro * ir_weight)))
 
 
 def parse_args():
@@ -264,22 +316,26 @@ def parse_args():
         default=300,
         type=int,
     )
+    parser.add_argument(
+        "-c",
+        "--comp_cat",
+        dest="comp_cat",
+        help="The radio component catalogue to be used for filtering",
+        default=None,
+        type=str,
+    )
     args = parser.parse_args()
     return args
 
 
-def main(df, outfile, img_size, img_path, threads=None, ir_weight=0.05):
+def main(df, outfile, img_size, img_path, threads=None, **kwargs):
     if threads is None:
         threads = cpu_count()
 
     pool = Pool(processes=threads)
 
     kwargs = dict(
-        ir=True,
-        img_size=img_size,
-        radio_path=img_path,
-        ir_path=img_path,
-        ir_weight=ir_weight,
+        ir=True, img_size=img_size, radio_path=img_path, ir_path=img_path, **kwargs
     )
     with pu.ImageWriter(outfile, 0, img_size, clobber=True) as pk_img:
         results = [
@@ -307,12 +363,17 @@ if __name__ == "__main__":
             add_filename, survey=args.ir_survey
         )
 
+    all_comps = None
+    if args.comp_cat is not None:
+        all_comps = Table.read(args.comp_cat)
+
     main(
         df,
         args.outfile,
         img_size=(2, args.img_size, args.img_size),
         img_path=args.img_path,
         threads=args.threads,
+        all_comps=all_comps,
         ir_weight=args.ir_weight,
     )
 
