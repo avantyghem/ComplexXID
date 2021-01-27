@@ -104,9 +104,8 @@ def preprocess_hull(radio_data, ir_data, sigma=10, threshold=0.05):
 
 
 def comp_filter(all_comps, ra, dec, hdr, threshold=0.01):
-    # Get x, y posns of all radio comps in the image
-    # Use a convex hull based on radio comp posns
-    # Smooth with some gaussians
+    """Create a filter (mask) based on the positions of real components.
+    Connect the components by a convex hull"""
     coord = SkyCoord(ra, dec, unit=u.deg)
     all_coords = SkyCoord(
         all_comps["RA"].data.data, all_comps["DEC"].data.data, unit=u.deg
@@ -214,10 +213,6 @@ def vlass_preprocessing(
     if radio_hdu.header["NAXIS"] == 0:
         print(f"Empty image: {radio_file}")
         return None
-
-    # d_wcs = WCS(radio_hdu.header).celestial
-    # radio_hdu.data = np.squeeze(radio_hdu.data)
-    # radio_hdu.header = d_wcs.to_header()
 
     if not ir:
         # Preprocess the radio only
@@ -328,24 +323,29 @@ def parse_args():
     return args
 
 
-def main(df, outfile, img_size, img_path, threads=None, **kwargs):
-    if threads is None:
-        threads = cpu_count()
-
-    pool = Pool(processes=threads)
-
-    kwargs = dict(
-        ir=True, img_size=img_size, radio_path=img_path, ir_path=img_path, **kwargs
+def main(df, outfile, img_size, img_path, threads=None, parallel=True, **kwargs):
+    kwargs.update(
+        dict(ir=True, img_size=img_size, radio_path=img_path, ir_path=img_path)
     )
+
     with pu.ImageWriter(outfile, 0, img_size, clobber=True) as pk_img:
-        results = [
-            pool.apply_async(vlass_preprocessing, args=(idx, df), kwds=kwargs)
-            for idx in df.index
-        ]
-        for res in tqdm(results):
-            out = res.get()
-            if out is not None:
-                pk_img.add(out[1], attributes=out[0])
+        if not parallel:
+            for idx in tqdm(df.index):
+                out = vlass_preprocessing(idx, df, **kwargs)
+                if out is not None:
+                    pk_img.add(out[1], attributes=out[0])
+        else:
+            if threads is None:
+                threads = cpu_count()
+            pool = Pool(processes=threads)
+            results = [
+                pool.apply_async(vlass_preprocessing, args=(idx, df), kwds=kwargs)
+                for idx in df.index
+            ]
+            for res in tqdm(results):
+                out = res.get()
+                if out is not None:
+                    pk_img.add(out[1], attributes=out[0])
 
 
 if __name__ == "__main__":
@@ -367,6 +367,8 @@ if __name__ == "__main__":
     if args.comp_cat is not None:
         all_comps = Table.read(args.comp_cat)
 
+    parallel = False if all_comps is not None else True
+
     main(
         df,
         args.outfile,
@@ -375,5 +377,6 @@ if __name__ == "__main__":
         threads=args.threads,
         all_comps=all_comps,
         ir_weight=args.ir_weight,
+        parallel=parallel,
     )
 
