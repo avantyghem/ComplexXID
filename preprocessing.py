@@ -108,7 +108,7 @@ def comp_filter(all_comps, ra, dec, hdr, threshold=0.01):
     Connect the components by a convex hull"""
     coord = SkyCoord(ra, dec, unit=u.deg)
     all_coords = SkyCoord(
-        all_comps["RA"].data.data, all_comps["DEC"].data.data, unit=u.deg
+        np.array(all_comps["RA"]), np.array(all_comps["DEC"]), unit=u.deg
     )
     max_sep = 0.5 * hdr["NAXIS2"] * hdr["CD2_2"] * 60 * u.arcmin
     coord_inds = np.where(coord.separation(all_coords) <= max_sep)
@@ -367,7 +367,7 @@ if __name__ == "__main__":
     if args.comp_cat is not None:
         all_comps = Table.read(args.comp_cat)
 
-    parallel = False if all_comps is not None else True
+    parallel = all_comps is None
 
     main(
         df,
@@ -375,8 +375,8 @@ if __name__ == "__main__":
         img_size=(2, args.img_size, args.img_size),
         img_path=args.img_path,
         threads=args.threads,
+        parallel=parallel,
         all_comps=all_comps,
         ir_weight=args.ir_weight,
-        parallel=parallel,
     )
 
