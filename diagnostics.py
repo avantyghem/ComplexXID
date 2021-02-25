@@ -274,6 +274,7 @@ def plot_image(
     show_index=True,
     wcs=None,
     grid=False,
+    bmu_mask=None,
 ):
     """Plot an image from the image set.
 
@@ -306,7 +307,7 @@ def plot_image(
     if apply_transform or show_bmu:
         # Need bmu_idx, which requires either a df or somset
         if somset is not None:
-            bmu_idx = somset.mapping.bmu(idx)
+            bmu_idx = somset.mapping.bmu(idx, bmu_mask=bmu_mask)
             tkey = somset.transform.data[(idx, *bmu_idx)]
         elif df is not None:
             bmu_idx = df.loc[idx]["bmu_tup"]

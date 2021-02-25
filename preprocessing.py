@@ -18,9 +18,10 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
 from astropy.modeling.models import Gaussian2D
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, search_around_sky
 from astropy.convolution import convolve, Gaussian2DKernel
 from reproject import reproject_interp
+from photutils.datasets import make_gaussian_sources_image
 
 import pyink as pu
 
@@ -103,35 +104,62 @@ def preprocess_hull(radio_data, ir_data, sigma=10, threshold=0.05):
 #     mask = pu.convex_hull_smoothed(data, sigma, 0.05)
 
 
-def comp_filter(all_comps, ra, dec, hdr, threshold=0.01):
+def comp_img(comps, posns, img_shape, pix_size=0.6):
+    src_tab = Table()
+    src_tab["amplitude"] = [1] * len(comps)
+    src_tab["x_mean"] = posns[0]
+    src_tab["y_mean"] = posns[1]
+    src_tab["x_stddev"] = comps["Maj"] / pix_size / 2.355
+    src_tab["y_stddev"] = comps["Min"] / pix_size / 2.355
+    src_tab["theta"] = 90 - comps["PA"]
+    return make_gaussian_sources_image(img_shape, src_tab)
+
+
+def comp_filter(comps_in_img, hdr, threshold=0.01):
     """Create a filter (mask) based on the positions of real components.
     Connect the components by a convex hull"""
-    coord = SkyCoord(ra, dec, unit=u.deg)
-    all_coords = SkyCoord(
-        np.array(all_comps["RA"]), np.array(all_comps["DEC"]), unit=u.deg
-    )
-    max_sep = 0.5 * hdr["NAXIS2"] * hdr["CD2_2"] * 60 * u.arcmin
-    coord_inds = np.where(coord.separation(all_coords) <= max_sep)
-    comps_in_img = all_comps[coord_inds]
     wcs = WCS(hdr)
-    x, y = wcs.all_world2pix(all_coords[coord_inds].ra, all_coords[coord_inds].dec, 0)
+    x, y = wcs.all_world2pix(comps_in_img["RA"], comps_in_img["DEC"], 0)
 
+    img_shape = (hdr["NAXIS2"], hdr["NAXIS1"])
     pix_size = hdr["CD2_2"] * 3600
-    Y, X = np.mgrid[: hdr["NAXIS1"], : hdr["NAXIS2"]]
-    mod = np.zeros(X.shape)
-    for xi, yi, comp in zip(x, y, comps_in_img):
-        major = comp["Maj"] / pix_size
-        minor = comp["Min"] / pix_size
-        pa = 90 - comp["PA"]
-        mod += Gaussian2D(
-            x_mean=xi,
-            y_mean=yi,
-            x_stddev=major / 2.355,
-            y_stddev=minor / 2.355,
-            theta=pa,
-        )(X, Y)
-    hull = pu.convex_hull(mod, threshold=threshold)
+    img = comp_img(comps_in_img, (x, y), img_shape, pix_size)
+    hull = pu.convex_hull(img, threshold=threshold)
     return hull
+
+
+# def comp_filter(all_comps, ra, dec, hdr, threshold=0.01):
+#     """Create a filter (mask) based on the positions of real components.
+#     Connect the components by a convex hull"""
+#     coord = SkyCoord(ra, dec, unit=u.deg)
+#     all_coords = SkyCoord(
+#         np.array(all_comps["RA"]), np.array(all_comps["DEC"]), unit=u.deg
+#     )
+#     max_sep = 0.5 * hdr["NAXIS2"] * hdr["CD2_2"] * 60 * u.arcmin
+#     coord_inds = np.where(coord.separation(all_coords) <= max_sep)
+#     comps_in_img = all_comps[coord_inds]
+
+#     wcs = WCS(hdr)
+#     x, y = wcs.all_world2pix(comps_in_img["RA"], comps_in_img["DEC"], 0)
+
+#     img_shape = (hdr["NAXIS2"], hdr["NAXIS1"])
+#     pix_size = hdr["CD2_2"] * 3600
+
+#     Y, X = np.mgrid[: hdr["NAXIS1"], : hdr["NAXIS2"]]
+#     mod = np.zeros(X.shape)
+#     for xi, yi, comp in zip(x, y, comps_in_img):
+#         major = comp["Maj"] / pix_size
+#         minor = comp["Min"] / pix_size
+#         pa = 90 - comp["PA"]
+#         mod += Gaussian2D(
+#             x_mean=xi,
+#             y_mean=yi,
+#             x_stddev=major / 2.355,
+#             y_stddev=minor / 2.355,
+#             theta=pa,
+#         )(X, Y)
+#     hull = pu.convex_hull(mod, threshold=threshold)
+#     return hull
 
 
 def check_radio_data(data, idx):
@@ -194,6 +222,7 @@ def vlass_preprocessing(
     radio_fname_col="filename",
     ir_fname_col="ir_filename",
     all_comps=None,
+    comp_idx_map=None,
     ir_weight=0.05,
 ):
     """Preprocess a single VLASS image. 
@@ -244,8 +273,11 @@ def vlass_preprocessing(
     if not check_ir_data(ir_prepro, idx):
         return None
     # ir_prepro *= pu.convex_hull_smoothed(e_new_data, 15, 0.05)
+
     if all_comps is not None:
-        ir_prepro *= comp_filter(all_comps, ra, dec, reproj_hdr)
+        idx1, idx2 = comp_idx_map
+        comps_in_img = all_comps[idx2[idx1 == idx]]
+        ir_prepro *= comp_filter(comps_in_img, reproj_hdr)
 
     return (idx, np.array((radio_prepro * (1 - ir_weight), ir_prepro * ir_weight)))
 
@@ -323,15 +355,40 @@ def parse_args():
     return args
 
 
-def main(df, outfile, img_size, img_path, threads=None, parallel=True, **kwargs):
+def main(
+    sample,
+    outfile,
+    img_size,
+    img_path,
+    threads=None,
+    parallel=True,
+    all_comps=None,
+    seplimit=90,
+    **kwargs,
+):
     kwargs.update(
-        dict(ir=True, img_size=img_size, radio_path=img_path, ir_path=img_path)
+        dict(
+            ir=True,
+            img_size=img_size,
+            radio_path=img_path,
+            ir_path=img_path,
+            all_comps=all_comps,
+        )
     )
+
+    if all_comps is not None:
+        seplimit = u.Quantity(seplimit, u.arcsec)
+        coords = SkyCoord(np.array(sample["RA"]), np.array(sample["DEC"]), unit=u.deg)
+        all_coords = SkyCoord(
+            np.array(all_comps["RA"]), np.array(all_comps["DEC"]), unit=u.deg
+        )
+        idx1, idx2, sep, dist = search_around_sky(coords, all_coords, seplimit=seplimit)
+        kwargs.update(comp_idx_map=(idx1, idx2))
 
     with pu.ImageWriter(outfile, 0, img_size, clobber=True) as pk_img:
         if not parallel:
-            for idx in tqdm(df.index):
-                out = vlass_preprocessing(idx, df, **kwargs)
+            for idx in tqdm(sample.index):
+                out = vlass_preprocessing(idx, sample, **kwargs)
                 if out is not None:
                     pk_img.add(out[1], attributes=out[0])
         else:
@@ -339,8 +396,8 @@ def main(df, outfile, img_size, img_path, threads=None, parallel=True, **kwargs)
                 threads = cpu_count()
             pool = Pool(processes=threads)
             results = [
-                pool.apply_async(vlass_preprocessing, args=(idx, df), kwds=kwargs)
-                for idx in df.index
+                pool.apply_async(vlass_preprocessing, args=(idx, sample), kwds=kwargs)
+                for idx in sample.index
             ]
             for res in tqdm(results):
                 out = res.get()
@@ -353,13 +410,13 @@ if __name__ == "__main__":
 
     # Feed DataFrame directly into preprocessing routine
     # Requires filename columns
-    df = pd.read_csv(args.sample)
+    sample = pd.read_csv(args.sample)
 
-    if "filename" not in df:
-        df["filename"] = df["Component_name"].apply(
+    if "filename" not in sample:
+        sample["filename"] = sample["Component_name"].apply(
             add_filename, survey=args.radio_survey
         )
-        df["ir_filename"] = df["Component_name"].apply(
+        sample["ir_filename"] = sample["Component_name"].apply(
             add_filename, survey=args.ir_survey
         )
 
@@ -370,13 +427,14 @@ if __name__ == "__main__":
     parallel = all_comps is None
 
     main(
-        df,
+        sample,
         args.outfile,
         img_size=(2, args.img_size, args.img_size),
         img_path=args.img_path,
         threads=args.threads,
         parallel=parallel,
         all_comps=all_comps,
+        seplimit=90 * u.arcsec,
         ir_weight=args.ir_weight,
     )
 
