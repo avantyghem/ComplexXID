@@ -160,7 +160,7 @@ def download_data(
 
     print(f"Downloading any required image cutouts to the directory: {download_path}")
     grab_cutouts(
-        radio_sample,
+        radio_cat,
         output_dir=download_path,
         name_col=name_col,
         imgsize_arcmin=imgsize_arcmin,
@@ -170,7 +170,7 @@ def download_data(
 
 
 def preprocess(
-    radio_sample,
+    radio_cat,
     imbin_file,
     img_size=(2, 150, 150),
     tile_cutout_path="",
@@ -179,7 +179,7 @@ def preprocess(
 ):
     # /// Preprocess Data \\\
     if not os.path.exists(imbin_file) or overwrite:
-        preprocessing.main(radio_sample, imbin_file, img_size, tile_cutout_path)
+        preprocessing.main(radio_cat, imbin_file, img_size, tile_cutout_path)
 
     if remove_tile_cutouts:
         shutil.rmtree(tile_cutout_path)
@@ -225,7 +225,7 @@ def map(
 
 
 def collate(
-    radio_sample,
+    radio_cat,
     ir_cat,
     imgs,
     somset,
@@ -233,16 +233,18 @@ def collate(
     sorter_mode="area_ratio",
     pix_scale=0.6,
     comp_name_col="Component_name",
+    **kwargs,
 ):
     # /// Collate Sources \\\
     src_cat = collation.main(
-        radio_sample,
+        radio_cat,
         ir_cat,
         imgs,
         somset,
         annotation,
         sorter_mode=sorter_mode,
         pix_scale=pix_scale,
+        **kwargs,
     )
 
     all_srcs = np.repeat(src_cat.Source_name, src_cat.Component_names.str.len())
@@ -251,7 +253,7 @@ def collate(
 
     # This will miss out on components that did not preprocess properly
     # Probably not a problem, since it can be joined normally with the original
-    comp_cat = collation.component_table(radio_sample.loc[imgs.records], somset)
+    comp_cat = collation.component_table(radio_cat.loc[imgs.records], somset)
     comp_cat = comp_cat.merge(comp_src_map, on=comp_name_col)
     comp_cat.Flip = comp_cat.Flip.astype("int32")
 
@@ -280,6 +282,7 @@ def run_all(
     cpu_only=False,
     sorter_mode="area_ratio",
     pix_scale=0.6,
+    som_mask=None,
 ):
     """Run the preprocess, map, and collate steps for a single sample.
 
@@ -293,13 +296,13 @@ def run_all(
     Returns:
         [type]: [description]
     """
-    radio_sample, ir_cat = catalogues
+    radio_cat, ir_cat = catalogues
 
     # Preprocess
     imbin_file, map_file, trans_file = binary_names(unique_id, bin_path)
     print(f"Preprocessing the sample: {imbin_file}")
     imgs = preprocess(
-        radio_sample,
+        radio_cat,
         imbin_file,
         img_size=img_size,
         tile_cutout_path=image_cutout_path,
@@ -321,6 +324,7 @@ def run_all(
         numthreads=numthreads,
         cpu_only=cpu_only,
     )
+    somset.som.bmu_mask = som_mask
     print("...done")
 
     # Collate
@@ -331,7 +335,7 @@ def run_all(
 
     print(f"Collating...")
     comp_cat, src_cat = collate(
-        radio_sample,
+        radio_cat,
         ir_cat,
         imgs,
         somset,

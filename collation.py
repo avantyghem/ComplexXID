@@ -64,7 +64,7 @@ def source_name(ra, dec, aprec=2, dp=5, prefix="VLASS1QLCIR"):
     return sname
 
 
-def retrieve_source(group, radio_positions, ir_positions, idx):
+def retrieve_source(group, radio_positions, ir_posns, idx):
     G = group.graph
     subg = sorted(nx.connected_components(G), key=lambda x: len(x), reverse=True)[idx]
     subg = list(subg)
@@ -76,7 +76,7 @@ def retrieve_source(group, radio_positions, ir_positions, idx):
     bmu = tuple(data[2]["bmu"])
 
     components = radio_positions[np.array(subg)]
-    ir_srcs = ir_positions[ir_hosts]
+    ir_srcs = ir_posns[ir_hosts]
     # mean_component = SkyCoord(components.cartesian.mean())
 
     node_data = [G.nodes(data=True)[d] for d in subg]
@@ -87,16 +87,18 @@ def retrieve_source(group, radio_positions, ir_positions, idx):
 def source_info(
     group,
     subg,
-    radio_cat,
-    ir_cat,
-    radio_positions,
-    ir_positions,
+    base_cat,
+    match_catalogues,
     radio_name="Component_name",
     host_name="unwise_detid",
 ):
     G = group.graph
     somset = group.sorter.som_set
     subg = list(subg)
+    # subg is for the idx of the radio match_catalogue in pu.FilterSet
+
+    # match_coords = G.filters.match_catalogues
+    radio_cat, ir_cat = match_catalogues
 
     data = [d for d in G.edges(nbunch=subg, data=True)]
     data = min(data, key=lambda x: x[2]["count"])
@@ -104,22 +106,25 @@ def source_info(
     src_idx = data[2]["src_idx"]
     ir_hosts = data[2]["IR Host"]
     bmu = tuple(data[2]["bmu"])
+    filters = group.filters[src_idx]
+
+    radio_ind_mask = filters[0].coord_label_contains("Related Radio")
+    radio_inds = filters[0].coords.src_idx[radio_ind_mask]
 
     # Radio position info
-    components = radio_positions[np.array(subg)]
-    best_comp_pos = radio_positions[src_idx]
-    mean_component = SkyCoord(components.cartesian.mean())
-    comp_ra = [rs.ra.value for rs in components]
-    comp_dec = [rs.dec.value for rs in components]
-    radio_comps = radio_cat.iloc[subg]  # networkx resets numbering
-    best_comp = radio_cat.iloc[src_idx]
+    best_comp = base_cat.iloc[src_idx]
+    # radio_comps = radio_cat.iloc[subg]  # networkx resets numbering
+    radio_comps = radio_cat.iloc[radio_inds]  # networkx resets numbering
+    comp_ra = list(radio_comps["RA"])
+    comp_dec = list(radio_comps["DEC"])
     comp_names = list(radio_comps[radio_name])
+    # mean_component = SkyCoord(components.cartesian.mean())
 
     # IR position info
-    ir_srcs = ir_positions[ir_hosts]
-    ir_src_ra = [irs.ra.value for irs in ir_srcs]
-    ir_src_dec = [irs.dec.value for irs in ir_srcs]
-    ir_host_id = list(ir_cat[host_name].iloc[ir_hosts])
+    ir_comps = ir_cat.iloc[ir_hosts]
+    ir_ra = list(ir_comps["RA"])
+    ir_dec = list(ir_comps["DEC"])
+    ir_host_id = list(ir_comps[host_name])
 
     # Derived info
     total_flux = radio_comps["Total_flux"].sum()
@@ -129,27 +134,31 @@ def source_info(
     peak_comp = radio_comps.Peak_flux.idxmax()
     euc_dist = somset.mapping.bmu_ed(src_idx)[0]
     # node_data = [G.nodes(data=True)[d] for d in subg]
-    # pdb.set_trace()
 
     source = OrderedDict(
-        RA_source=best_comp_pos.ra.value,
-        DEC_source=best_comp_pos.dec.value,
-        N_components=len(components),
+        src_idx=src_idx,
+        RA_source=best_comp["RA"],
+        DEC_source=best_comp["DEC"],
+        N_components=len(radio_comps),
         Best_component=best_comp.Component_name,
         Component_names=comp_names,
         RA_components=comp_ra,
         DEC_components=comp_dec,
-        N_host_candidates=len(ir_srcs),
+        N_host_candidates=len(ir_comps),
         Host_candidates=ir_host_id,
-        RA_host_candidates=ir_src_ra,
-        DEC_host_candidates=ir_src_dec,
+        RA_host_candidates=ir_ra,
+        DEC_host_candidates=ir_dec,
         Best_neuron=bmu,
         Euc_dist=euc_dist,
         Total_flux=total_flux,
         E_Total_flux=e_total_flux,
-        Peak_flux=radio_comps.Peak_flux.loc[peak_comp],
-        E_Peak_flux=radio_comps.E_Peak_flux.loc[peak_comp],
+        Peak_flux=radio_comps.loc[peak_comp, "Peak_flux"],
+        E_Peak_flux=radio_comps.loc[peak_comp, "E_Peak_flux"],
     )
+
+    # if np.abs(source["RA_source"] - np.mean(source["RA_components"])) > 10:
+    # pdb.set_trace()
+
     return source
 
 
@@ -185,25 +194,49 @@ def best_host(components, ir_srcs, sep_limit):
 
 
 def main(
-    radio_cat, ir_cat, imgs, somset, annotation, sorter_mode="area_ratio", pix_scale=0.6
+    radio_cat,
+    ir_cat,
+    imgs,
+    somset,
+    annotation,
+    sorter_mode="area_ratio",
+    pix_scale=0.6,
+    full_radio_cat=None,
+    **kwargs,
 ):
     pix_scale = u.Quantity(pix_scale, u.arcsec)
     seplimit = 0.5 * np.max(imgs.data.shape[-2:]) * pix_scale
 
     radio_cat = radio_cat.loc[imgs.records]
+    if full_radio_cat is None:
+        full_radio_cat = radio_cat
 
-    radio_positions = SkyCoord(radio_cat.RA, radio_cat.DEC, unit=u.deg)
-    ir_positions = SkyCoord(ir_cat.ra, ir_cat.dec, unit=u.deg)
+    radio_posns = SkyCoord(
+        np.array(radio_cat["RA"]), np.array(radio_cat["DEC"]), unit=u.deg
+    )
 
-    # radio_matches = search_around_sky(
-    #     radio_positions, radio_positions, seplimit=3 * u.arcmin / 2
+    all_radio_posns = SkyCoord(
+        np.array(full_radio_cat["RA"]), np.array(full_radio_cat["DEC"]), unit=u.deg
+    )
+    # radio_matches = search_around_sky(radio_posns, all_radio_posns, seplimit=seplimit)
+    # full_radio_cat = (
+    #     full_radio_cat.iloc[radio_matches[1]].drop_duplicates().reset_index(drop=True)
     # )
-    ir_matches = search_around_sky(radio_positions, ir_positions, seplimit=seplimit)
+    # all_radio_posns = SkyCoord(
+    #     np.array(full_radio_cat["RA"]), np.array(full_radio_cat["DEC"]), unit=u.deg
+    # )
+
+    ir_cat = ir_cat.drop_duplicates().reset_index(drop=True)
+    ir_posns = SkyCoord(np.array(ir_cat["RA"]), np.array(ir_cat["DEC"]), unit=u.deg)
+    # ir_matches = search_around_sky(radio_posns, ir_posns, seplimit=seplimit)
+    # ir_cat = ir_cat.iloc[ir_matches[1]].drop_duplicates().reset_index(drop=True)
+    # ir_posns = SkyCoord(np.array(ir_cat["RA"]), np.array(ir_cat["DEC"]), unit=u.deg)
 
     # Projecting the filters
     filters = pu.FilterSet(
-        radio_positions,
-        (radio_positions, ir_positions),
+        radio_posns,
+        (all_radio_posns, ir_posns),
+        # (radio_posns, ir_posns),
         annotation,
         somset,
         seplimit=seplimit,
@@ -215,25 +248,36 @@ def main(
     # Inspect the assigned and unassigned components for a given index
     sorter = pu.Sorter(somset, annotation, mode=sorter_mode)
 
+    # LINK, UNLINK, RESOLVE, FLAG, PASS, ISOLATE
+    # NODE_ATTACH, DATA_ATTACH, TRUE_ATTACH, FALSE_ATTACH
     actions = pu.LabelResolve(
         {
-            "Follow up": pu.Action.PASS,
+            "Follow up": pu.Action.TRUE_ATTACH,
             "Related Radio": pu.Action.LINK,
             "IR Host": pu.Action.DATA_ATTACH,
+            # "Sidelobe": pu.Action.TRUE_ATTACH,
         }
     )
-    # LINK, UNLINK, RESOLVE, FLAG, PASS, NODE_ATTACH, DATA_ATTACH, TRUE_ATTACH, FALSE_ATTACH, ISOLATE
 
     def src_fn(idx):
-        return {"idx": idx * 2, "bmu": somset.mapping.bmu(idx)}
+        # idx is taken from the Sorter, so one per image
+        return {
+            "idx": idx,
+            "bmu": somset.mapping.bmu(idx, bmu_mask=somset.som.bmu_mask),
+            "ra": radio_posns[idx].ra.deg,
+            "dec": radio_posns[idx].dec.deg,
+        }
 
+    print("Grouping the components")
     group = pu.Grouper(
         filters, annotation, actions, sorter, src_stats_fn=src_fn, progress=True
     )
 
+    print("Creating the source catalogue")
     source_cat = pd.DataFrame(
-        collate(group, radio_cat, ir_cat, radio_positions, ir_positions)
+        collate(group, radio_cat, (full_radio_cat, ir_cat), **kwargs)
     )
+
     names = source_name(source_cat.RA_source, source_cat.DEC_source, prefix="VLASS1QLC")
     source_cat.insert(0, "Source_name", names)
     # source_cat["Source_name"] = names
@@ -242,8 +286,9 @@ def main(
 
 
 def component_table(radio_cat, somset, name_col="Component_name"):
-    bmu = somset.mapping.bmu()
-    euc_dist = somset.mapping.bmu_ed()
+    bmu = somset.mapping.bmu(bmu_mask=somset.som.bmu_mask)
+    bmut = somset.mapping.bmu(return_tuples=True, bmu_mask=somset.som.bmu_mask)
+    euc_dist = somset.mapping.bmu_ed(bmu_mask=somset.som.bmu_mask)
     ind = np.arange(somset.transform.data.shape[0])
     trans = somset.transform.data[ind, bmu[:, 0], bmu[:, 1]]
     flip = trans["flip"]
@@ -251,6 +296,7 @@ def component_table(radio_cat, somset, name_col="Component_name"):
     comp_tab = pd.DataFrame(
         {
             name_col: radio_cat[name_col],
+            "bmu": bmut,
             "Best_neuron_y": bmu[:, 0],
             "Best_neuron_x": bmu[:, 1],
             "Euc_dist": euc_dist,
@@ -265,47 +311,4 @@ def neuron_table():
     # Create neuron table
     # bmu, global text labels, any properties derived from filters
     return
-
-
-if __name__ == "__main__":
-
-    # unWISE catalogue available here:
-    # http://vizier.u-strasbg.fr/viz-bin/VizieR-3?-source=II/363/unwise
-    radio_cat = Table.read("vlass_RA_185_190_DEC_21_26.csv", format="csv").to_pandas()
-    ir_cat = Table.read("unwise_RA_185_190_DEC_21_26.csv", format="csv").to_pandas()
-
-    # The mapping file does not necessarily correspond to the imbin used to train the SOM.
-    imbin_file = "imgs_RA_185_190_DEC_21_26_imgs.bin"
-    som_file = "June2_sample/unity_som_10w10h_5.bin"
-
-    imgs = pu.ImageReader(imbin_file)
-    som = pu.SOM(som_file)
-    mapping = pu.Mapping("MAP_RA_185_190_DEC_21_26.bin")
-    transform = pu.Transform("TRANSFORM_RA_185_190_DEC_21_26.bin")
-    somset = pu.SOMSet(som, mapping, transform)
-
-    annotation = pu.Annotator(
-        som.path, results="June2_sample/unity_som_10w10h_5.bin.results.pkl"
-    )
-
-    source_cat = main(
-        radio_cat, ir_cat, imgs, somset, annotation, sorter_mode="area_ratio"
-    )
-
-
-"""
-random_idxs = np.random.randint(0, somset.mapping.data.shape[0], size=5)
-best_idxs = sorter[:6]
-worst_idxs = sorter[-6:]
-plot_filter_idx(imgs, filters, worst_idxs[0])
-"""
-
-# data, bmu, components, ir_srcs = retrieve_source(
-#     group, radio_positions, ir_positions, 0
-# )
-# plot_source(imgs, somset, radio_cat, data[2]["src_idx"], components, ir_srcs, 0.36)
-
-
-# ant = annotation.results[bmu]
-# ax = plt.imshow(ant.neuron[0], cmap="bwr")
 

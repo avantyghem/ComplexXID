@@ -101,17 +101,25 @@ def vlass_tile(subtiles):
     return tiles
 
 
-def load_vlass_catalogue(catalog, complex=True, **kwargs):
+def load_vlass_catalogue(catalog, complex=False, pandas=False, **kwargs):
     fmt = "fits" if catalog.endswith("fits") else "csv"
-    df = Table.read(catalog, format=fmt).to_pandas()
-    # df = df[(df.Quality_flag == 0) & (df.Duplicate_flag < 2)]
-    df = df[df.Total_flux >= df.Peak_flux]
-    df = df[df.Peak_flux >= 5 * df.Isl_rms]
-    df = df[df.Duplicate_flag < 2]
-    df["SNR"] = np.array(df.Total_flux / df.Isl_rms)
+    rcat = Table.read(catalog, format=fmt)
+    # rcat = rcat[(rcat.Quality_flag == 0) & (rcat.Duplicate_flag < 2)]
+    rcat = rcat[rcat["Total_flux"] >= rcat["Peak_flux"]]
+    rcat = rcat[rcat["Peak_flux"] >= 5 * rcat["Isl_rms"]]
+    rcat = rcat[rcat["Duplicate_flag"] < 2]
+    rcat["SNR"] = rcat["Total_flux"] / rcat["Isl_rms"]
+
     if complex:
-        df = complex_vlass(df, **kwargs)
-    return df
+        rcat = complex_vlass(rcat, **kwargs)
+
+    if pandas:
+        rcat = rcat.to_pandas()
+        if fmt == "fits":
+            for col in rcat.columns[rcat.dtypes == object]:
+                rcat[col] = rcat[col].str.decode("ascii")
+
+    return rcat
 
 
 def complex_vlass(df, NN_dist=72, SNR_min=None):
@@ -125,12 +133,12 @@ def complex_vlass(df, NN_dist=72, SNR_min=None):
     Returns:
         pandas.DataFrame: Subset of the input DataFrame containing only the complex components.
     """
-    mask = (df.S_Code == "S") & (df.NN_dist < NN_dist)
-    mask |= df.S_Code == "M"
-    mask |= df.S_Code == "C"
+    mask = (df["S_Code"] == "S") & (df["NN_dist"] < NN_dist)
+    mask |= df["S_Code"] == "M"
+    mask |= df["S_Code"] == "C"
     df = df[mask]
 
     if SNR_min is not None:
-        df = df[df.SNR >= SNR_min]
+        df = df[df["SNR"] >= SNR_min]
 
     return df
