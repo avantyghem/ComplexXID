@@ -326,6 +326,7 @@ def plot_image(
             nrow,
             nchan,
             figsize=(nchan * 4, nrow * 4),
+            squeeze=False,
             sharex=True,
             sharey=True,
             constrained_layout=cl,

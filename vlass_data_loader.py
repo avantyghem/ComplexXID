@@ -5,67 +5,6 @@ from astropy.table import Table
 import pandas as pd
 
 
-def build_ir_cat(ir_tile_info, ir_data_path, ra_bounds, dec_bounds):
-    # 861k rows in a 5x5 degree region
-    cols = ["ra", "dec", "unwise_detid", "flux"]
-    ra_min, ra_max = ra_bounds
-    dec_min, dec_max = dec_bounds
-    info = pd.read_csv(ir_tile_info)
-    mask = (
-        (info.cenRA >= ra_min)
-        & (info.cenRA <= ra_max)
-        & (info.cenDec >= dec_min)
-        & (info.cenDec <= dec_max)
-    )
-    info = info[mask]
-    coads = info.Coad_ID.values
-    for coad in coads:
-        coad_file = os.path.join(ir_data_path, f"{coad}.1.cat.fits")
-        new_df = Table.read(coad_file).to_pandas()
-        try:
-            df = pd.concat([df, new_df])
-        except NameError:
-            df = new_df.copy()
-    return df
-
-
-def sky_chunk_something(
-    ir_tile_info, ir_data_path, ra_range=(190, 195), dec_range=(24, 29)
-):
-    """Load radio and IR catalogues for a small region on the sky. 
-    The ImageReader binary file will (probably) correspond to the
-    catalogue covering the entire sky. Will need to be
-    careful about sources at the edge of each chunk.
-    Could provide a 1.5' overlap in the chunk edges to handle these
-    cases.
-    Start off with a fixed RA/Dec limit that is manually chosen 
-    and has a similar size as the VLASS QL images.
-    Then update to use only components within a single QL image.
-    Consider creating Image Binaries for each tile.
-    """
-    ra_min, ra_max = ra_range
-    dec_min, dec_max = dec_range
-    return radio_cat, ir_cat
-
-
-def sky_chunk(df, ra_range=(190, 195), dec_range=(24, 29)):
-    """Restrict a DataFrame to an RA and Dec range
-    """
-    ra_min, ra_max = ra_range
-    dec_min, dec_max = dec_range
-    bounds = (
-        (df.RA > ra_min) & (df.RA < ra_max) & (df.DEC > dec_min) & (df.DEC < dec_max)
-    )
-    df = df[bounds]
-    return df
-
-
-def load_tile(tile_id):
-    """Load the VLASS and unWISE catalogues for a single VLASS tile.
-    """
-    return
-
-
 def vlass_tile(subtiles):
     def tile_info(subtiles, tile):
         t = subtiles[subtiles.Tile == tile]
@@ -101,13 +40,19 @@ def vlass_tile(subtiles):
     return tiles
 
 
-def load_vlass_catalogue(catalog, complex=False, pandas=False, **kwargs):
+def load_vlass_catalogue(
+    catalog, flag_data=True, flag_SNR=False, pandas=False, **kwargs
+):
     fmt = "fits" if catalog.endswith("fits") else "csv"
     rcat = Table.read(catalog, format=fmt)
-    # rcat = rcat[(rcat.Quality_flag == 0) & (rcat.Duplicate_flag < 2)]
-    rcat = rcat[rcat["Total_flux"] >= rcat["Peak_flux"]]
-    rcat = rcat[rcat["Peak_flux"] >= 5 * rcat["Isl_rms"]]
-    rcat = rcat[rcat["Duplicate_flag"] < 2]
+
+    if flag_data:
+        rcat = rcat[rcat["S_Code"] != "E"]
+        rcat = rcat[rcat["Duplicate_flag"] < 2]
+
+    if flag_SNR:
+        rcat = rcat[rcat["Peak_flux"] >= 5 * rcat["Isl_rms"]]
+
     rcat["SNR"] = rcat["Total_flux"] / rcat["Isl_rms"]
 
     if complex:
