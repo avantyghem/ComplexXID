@@ -41,7 +41,7 @@ def vlass_tile(subtiles):
 
 
 def load_vlass_catalogue(
-    catalog, flag_data=True, flag_SNR=False, pandas=False, **kwargs
+    catalog, flag_data=True, flag_SNR=False, pandas=False, complex=False, **kwargs
 ):
     fmt = "fits" if catalog.endswith("fits") else "csv"
     rcat = Table.read(catalog, format=fmt)
